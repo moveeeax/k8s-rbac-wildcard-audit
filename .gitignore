@@ -1,0 +1,14 @@
+# Built binary — anchored to the repo root on purpose. A bare pattern would
+# also match the cmd/k8s-rbac-wildcard-audit/ source directory and drop its
+# main.go from the repo.
+/k8s-rbac-wildcard-audit
+/dist/
+
+# Go build and test artifacts
+/*.test
+/*.out
+/coverage.out
+
+# Keep every fixture tracked, whatever the globs above say.
+!testdata/**
+!**/testdata/**

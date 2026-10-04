@@ -1,0 +1,60 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        go: ["1.23", "1.25"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+          cache: true
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "these files need gofmt:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go test
+        run: go test -race -cover ./...
+
+      - name: build
+        run: go build -o k8s-rbac-wildcard-audit ./cmd/k8s-rbac-wildcard-audit
+
+      - name: audit the examples (self-check)
+        run: |
+          # The wildcard example must be reported critical and exit 1.
+          set +e
+          ./k8s-rbac-wildcard-audit --format json examples/wildcard-clusterrole.yaml > findings.json
+          code=$?
+          set -e
+          test "$code" = "1" || { echo "expected exit 1, got $code"; exit 1; }
+          grep -q '"wildcard-all"' findings.json
+
+          # The least-privilege example must be clean and exit 0.
+          ./k8s-rbac-wildcard-audit examples/least-privilege.yaml
+
+          # stdin, as `helm template | ...` would use it.
+          cat examples/escalation-paths.yaml | ./k8s-rbac-wildcard-audit --min-severity critical - || true
