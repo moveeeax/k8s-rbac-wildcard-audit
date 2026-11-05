@@ -14,7 +14,7 @@ import (
 )
 
 // version is overridden at release time with -ldflags "-X main.version=...".
-var version = "0.1.0"
+var version = "0.2.0"
 
 const usage = `k8s-rbac-wildcard-audit — find RBAC rules that grant more than they look like they do
 

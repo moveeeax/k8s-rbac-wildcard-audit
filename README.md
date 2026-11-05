@@ -1,7 +1,7 @@
 # k8s-rbac-wildcard-audit
 
 [![ci](https://github.com/moveeeax/k8s-rbac-wildcard-audit/actions/workflows/ci.yml/badge.svg)](https://github.com/moveeeax/k8s-rbac-wildcard-audit/actions/workflows/ci.yml)
-[![Go](https://img.shields.io/badge/go-1.23%2B-00ADD8?logo=go&logoColor=white)](https://go.dev)
+[![Go](https://img.shields.io/badge/go-1.26%2B-00ADD8?logo=go&logoColor=white)](https://go.dev)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 Static audit of Kubernetes `Role` and `ClusterRole` manifests. It names the rules
