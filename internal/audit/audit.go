@@ -3,6 +3,7 @@ package audit
 import (
 	"fmt"
 	"sort"
+	"time"
 )
 
 // Auditor applies the built-in rule set to parsed objects.
@@ -10,36 +11,57 @@ type Auditor struct {
 	// MinSeverity drops findings below this level from the report. The zero
 	// value means Medium, i.e. report everything.
 	MinSeverity Severity
+	// Ignores are the validated entries of --ignore-file.
+	Ignores []IgnoreEntry
+	// Now decides whether ignore entries have expired. The zero value means
+	// the current time.
+	Now time.Time
 }
 
 // Objects runs the audit over already-parsed objects and returns a sorted,
 // severity-filtered report.
 func (a Auditor) Objects(objs []Object) Report {
-	var rep Report
-	files := map[string]bool{}
-	for _, obj := range objs {
-		files[obj.File] = true
-		rep.Summary.ObjectsScanned++
-		for i, rule := range obj.Rules {
-			rep.Findings = append(rep.Findings, a.inspect(obj, rule, i)...)
-		}
-	}
-	rep.Summary.FilesScanned = len(files)
-
 	min := a.MinSeverity
 	if min == 0 {
 		min = Medium
 	}
-	kept := make([]Finding, 0, len(rep.Findings))
-	for _, f := range rep.Findings {
-		if f.Severity < min {
-			continue
-		}
-		kept = append(kept, f)
+	now := a.Now
+	if now.IsZero() {
+		now = time.Now()
 	}
-	rep.Findings = kept
+
+	var rep Report
+	files := map[string]bool{}
+	var all []Finding
+	for _, obj := range objs {
+		files[obj.File] = true
+		rep.Summary.ObjectsScanned++
+		for i, rule := range obj.Rules {
+			for _, f := range a.inspect(obj, rule, i) {
+				all = append(all, f)
+				// Findings below the gate are dropped before suppression,
+				// so summary.suppressed only counts what would have failed
+				// the run.
+				if f.Severity < min {
+					continue
+				}
+				if s := a.suppress(obj, f, now); s != nil {
+					f.Suppression = s
+					rep.Suppressed = append(rep.Suppressed, f)
+					continue
+				}
+				rep.Findings = append(rep.Findings, f)
+			}
+		}
+	}
+	rep.Summary.FilesScanned = len(files)
 	rep.Summary.MinSeverity = min
+	if rep.Findings == nil {
+		rep.Findings = []Finding{}
+	}
 	sortFindings(rep.Findings)
+	sortFindings(rep.Suppressed)
+	rep.Warnings = append(annotationWarnings(objs), a.expiredWarnings(all, now)...)
 
 	for _, f := range rep.Findings {
 		switch f.Severity {
@@ -51,6 +73,7 @@ func (a Auditor) Objects(objs []Object) Report {
 			rep.Summary.Medium++
 		}
 	}
+	rep.Summary.Suppressed = len(rep.Suppressed)
 	rep.Summary.Total = len(rep.Findings)
 	return rep
 }

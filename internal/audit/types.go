@@ -116,8 +116,9 @@ type Object struct {
 	APIVersion string `yaml:"apiVersion"`
 	Kind       string `yaml:"kind"`
 	Metadata   struct {
-		Name      string `yaml:"name"`
-		Namespace string `yaml:"namespace"`
+		Name        string            `yaml:"name"`
+		Namespace   string            `yaml:"namespace"`
+		Annotations map[string]string `yaml:"annotations"`
 	} `yaml:"metadata"`
 	Rules []Rule `yaml:"rules"`
 
@@ -147,12 +148,21 @@ type Finding struct {
 	Namespace string   `json:"namespace,omitempty"`
 	RuleIndex int      `json:"rule_index"`
 	RuleText  string   `json:"rule"`
+	// Suppression is set only on entries of Report.Suppressed.
+	Suppression *Suppression `json:"suppression,omitempty"`
 }
 
 // Report is the whole result of a run.
 type Report struct {
 	Findings []Finding `json:"findings"`
-	Summary  Summary   `json:"summary"`
+	// Suppressed holds the findings at or above the gate that an annotation
+	// or ignore-file entry accepted. They never affect the exit code. The CLI
+	// drops them from the output unless --show-suppressed is given.
+	Suppressed []Finding `json:"suppressed,omitempty"`
+	Summary    Summary   `json:"summary"`
+	// Warnings are problems with suppressions that did not stop the audit:
+	// unknown rule ids in annotations, expired ignore entries.
+	Warnings []string `json:"-"`
 }
 
 // Summary carries the counts a CI log wants on one line.
@@ -163,6 +173,9 @@ type Summary struct {
 	High           int `json:"high"`
 	Medium         int `json:"medium"`
 	Total          int `json:"total"`
+	// Suppressed counts findings at or above the gate that were accepted
+	// rather than reported. They are not part of Total.
+	Suppressed int `json:"suppressed"`
 	// MinSeverity echoes the gate the report was filtered at, so a "no
 	// findings" line can never be mistaken for a full audit.
 	MinSeverity Severity `json:"min_severity"`

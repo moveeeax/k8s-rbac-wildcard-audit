@@ -1,0 +1,7 @@
+ignores:
+  - rule_id: secrets-read
+    kind: Role
+    name: config-sync
+    namespace: apps
+    reason: mirrors one pull secret into the namespace
+    expires: 2027-03-01
