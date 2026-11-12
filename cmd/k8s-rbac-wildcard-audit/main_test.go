@@ -88,3 +88,49 @@ func TestVersionFlag(t *testing.T) {
 		t.Errorf("--version: exit = %d, out = %q, want %q", code, out, version)
 	}
 }
+
+func TestIgnoreFileAndShowSuppressed(t *testing.T) {
+	const manifest = "../../internal/audit/testdata/suppressed.yaml"
+	const ignores = "../../internal/audit/testdata/ignore.yaml"
+
+	// Without the ignore file, config-sync's secrets read still fails the run.
+	if code, out, _ := runCLI(t, manifest); code != 1 || !strings.Contains(out, "config-sync") {
+		t.Fatalf("no ignore file: exit = %d, want 1 with config-sync reported\n%s", code, out)
+	}
+
+	code, out, errb := runCLI(t, "--format", "json", "--ignore-file", ignores, manifest)
+	if code != 0 {
+		t.Fatalf("with ignore file: exit = %d, want 0\nstdout: %s\nstderr: %s", code, out, errb)
+	}
+	var rep struct {
+		Findings   []map[string]any `json:"findings"`
+		Suppressed []map[string]any `json:"suppressed"`
+		Summary    map[string]any   `json:"summary"`
+	}
+	if err := json.Unmarshal([]byte(out), &rep); err != nil {
+		t.Fatalf("not valid JSON: %v\n%s", err, out)
+	}
+	if len(rep.Findings) != 0 || rep.Summary["suppressed"] != float64(3) {
+		t.Errorf("findings = %v, summary = %v; want none and 3 suppressed", rep.Findings, rep.Summary)
+	}
+	if rep.Suppressed != nil {
+		t.Errorf("suppressed listed without --show-suppressed: %v", rep.Suppressed)
+	}
+
+	code, out, _ = runCLI(t, "--show-suppressed", "--ignore-file", ignores, manifest)
+	if code != 0 || strings.Count(out, "ACCEPTED") != 3 || !strings.Contains(out, "suppressed by ignore-file until 2027-03-01") {
+		t.Errorf("--show-suppressed: exit = %d, want 0 and 3 ACCEPTED lines\n%s", code, out)
+	}
+}
+
+func TestBadIgnoreFileExitsTwo(t *testing.T) {
+	code, _, errb := runCLI(t, "--ignore-file", "./does-not-exist.yaml", "../../examples")
+	if code != 2 || !strings.Contains(errb, "--ignore-file") {
+		t.Errorf("missing ignore file: exit = %d, stderr = %q", code, errb)
+	}
+	// A Role manifest is not an ignore file: unknown keys are rejected.
+	code, _, errb = runCLI(t, "--ignore-file", "../../examples/secret-reader.yaml", "../../examples")
+	if code != 2 {
+		t.Errorf("malformed ignore file: exit = %d, want 2, stderr = %q", code, errb)
+	}
+}

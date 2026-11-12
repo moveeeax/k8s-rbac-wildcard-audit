@@ -27,12 +27,19 @@ manifest stream from stdin.
 flags:
   --format string         text or json (default "text")
   --min-severity string   report and gate on medium, high or critical (default "medium")
+  --ignore-file string    YAML file of accepted findings (rule_id, kind, name,
+                          namespace, reason, expires)
+  --show-suppressed       also list the findings that were suppressed
   --version               print the version and exit
+
+A Role or ClusterRole can also accept findings on itself with the annotation
+rbac-audit.moveeeax.io/ignore: "secrets-read,pods-exec" and an optional
+rbac-audit.moveeeax.io/reason. Suppressed findings never fail the run.
 
 exit codes:
   0  no findings at or above --min-severity
   1  at least one finding at or above --min-severity
-  2  bad usage, unreadable path, or a YAML syntax error
+  2  bad usage, unreadable path, a YAML syntax error, or an invalid ignore file
 
 examples:
   k8s-rbac-wildcard-audit ./manifests
@@ -51,6 +58,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	format := fs.String("format", "text", "output format: text or json")
 	minSev := fs.String("min-severity", "medium", "minimum severity to report and fail on")
+	ignoreFile := fs.String("ignore-file", "", "YAML file of accepted findings")
+	showSuppressed := fs.Bool("show-suppressed", false, "also list suppressed findings")
 	showVersion := fs.Bool("version", false, "print version and exit")
 
 	if err := fs.Parse(args); err != nil {
@@ -75,9 +84,27 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	rep, errs := audit.Auditor{MinSeverity: sev}.Run(paths)
+	var ignores []audit.IgnoreEntry
+	if *ignoreFile != "" {
+		// An ignore file that cannot be read is a usage error, not an empty
+		// list: auditing without it would fail a gate the team already
+		// accepted, or worse, pass one with a silently broken file.
+		ignores, err = audit.LoadIgnoreFile(*ignoreFile)
+		if err != nil {
+			fmt.Fprintf(stderr, "error: --ignore-file: %v\n", err)
+			return 2
+		}
+	}
+
+	rep, errs := audit.Auditor{MinSeverity: sev, Ignores: ignores}.Run(paths)
 	for _, e := range errs {
 		fmt.Fprintf(stderr, "error: %v\n", e)
+	}
+	for _, w := range rep.Warnings {
+		fmt.Fprintf(stderr, "warning: %s\n", w)
+	}
+	if !*showSuppressed {
+		rep.Suppressed = nil // still counted in summary.suppressed
 	}
 
 	out := bufio.NewWriter(stdout)

@@ -78,6 +78,8 @@ and the index of the offending rule — enough to find it in a 4000-line
 | --- | --- | --- |
 | `--format` | `text` | `text` or `json` |
 | `--min-severity` | `medium` | report and fail on `medium`, `high` or `critical` |
+| `--ignore-file` | | YAML file of accepted findings, see [Suppressions](#suppressions) |
+| `--show-suppressed` | | also list suppressed findings (text: `ACCEPTED` lines; JSON: `suppressed`) |
 | `--version` | | print the version and exit |
 
 ### Exit codes
@@ -86,7 +88,7 @@ and the index of the offending rule — enough to find it in a 4000-line
 | --- | --- |
 | `0` | no findings at or above `--min-severity` |
 | `1` | at least one finding at or above `--min-severity` |
-| `2` | bad usage, unreadable path, or a YAML syntax error |
+| `2` | bad usage, unreadable path, a YAML syntax error, or an invalid `--ignore-file` |
 
 Exit `2` outranks a clean result on purpose: a manifest nobody could parse is a
 hole in the audit, not a pass.
@@ -129,6 +131,7 @@ grant is real whether or not `secrets` is spelled out.
     "high": 1,
     "medium": 0,
     "total": 1,
+    "suppressed": 0,
     "min_severity": "medium"
   }
 }
@@ -136,7 +139,50 @@ grant is real whether or not `secrets` is spelled out.
 
 `findings` is always an array, never `null`, so a `jq` pipeline survives a clean
 run. `min_severity` echoes the gate, so a zero-finding report can't be mistaken
-for a full audit.
+for a full audit. With `--show-suppressed`, a `suppressed` array lists the
+accepted findings in the same shape plus a `suppression` object
+(`source`: `annotation` or `ignore-file`, `reason`, `expires`).
+
+## Suppressions
+
+Some findings are the point of the role: an operator chart that reconciles
+Secrets has to read them. Accept those findings one by one instead of lowering
+`--min-severity` for the whole repo. Suppressed findings never fail the run,
+are counted in `summary.suppressed`, and are listed with `--show-suppressed`.
+
+On the object itself, for a chart you own:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: my-operator
+  annotations:
+    rbac-audit.moveeeax.io/ignore: "secrets-read,pods-exec"
+    rbac-audit.moveeeax.io/reason: "reconciles TLS secrets, runs migrations in its own pods"
+```
+
+The value lists rule ids; there is no "ignore everything". An id the tool does
+not know suppresses nothing and prints a warning on stderr.
+
+For third-party charts you cannot annotate, `--ignore-file`:
+
+```yaml
+# .rbac-audit-ignore.yaml
+ignores:
+  - rule_id: secrets-read
+    kind: ClusterRole          # optional, Role or ClusterRole; empty matches both
+    name: cert-manager-controller-certificates
+    namespace: ""              # optional; empty matches any namespace
+    reason: issues certificates into Secrets, upstream chart
+    expires: 2027-03-01        # optional, YYYY-MM-DD
+```
+
+`rule_id`, `name` and `reason` are required, so an entry can't silence a rule
+repo-wide or without a note. An entry still applies on its `expires` day; from
+the next day the finding is reported again and a warning names the expired
+entry. Unknown keys, unknown rule ids and malformed dates exit `2`: a typo in
+the ignore file should break the job, not quietly widen or drop a suppression.
 
 ## In CI
 
@@ -145,6 +191,12 @@ for a full audit.
   run: |
     go install github.com/moveeeax/k8s-rbac-wildcard-audit/cmd/k8s-rbac-wildcard-audit@latest
     k8s-rbac-wildcard-audit --min-severity high ./manifests
+```
+
+With accepted findings:
+
+```sh
+k8s-rbac-wildcard-audit --min-severity high --ignore-file .rbac-audit-ignore.yaml ./manifests
 ```
 
 Start at `--min-severity critical` on an existing repo, fix what it finds, then

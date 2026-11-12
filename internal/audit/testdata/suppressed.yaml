@@ -1,0 +1,27 @@
+# An operator that legitimately reads Secrets and execs into its own pods,
+# with both findings accepted on the object itself.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: operator
+  annotations:
+    rbac-audit.moveeeax.io/ignore: "secrets-read, pods-exec"
+    rbac-audit.moveeeax.io/reason: "reconciles TLS secrets and runs migrations in its own pods"
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+---
+# Accepted only through the ignore file.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: config-sync
+  namespace: apps
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
